@@ -21,7 +21,7 @@ const (
 	daemonArg0       = "without-clash-daemon"
 	cgroupSubtree    = "without-clash"
 	offsetOfMark     = 16
-	withoutClashMark = 114514
+	withoutClashMark = 'w'<<24 | 'o'<<16 | 'c'<<8 | 'h'<<0
 )
 
 func daemon() {
@@ -60,7 +60,7 @@ func daemon() {
 		Type:       ebpf.CGroupSock,
 		AttachType: ebpf.AttachCGroupInetSockCreate,
 		Instructions: asm.Instructions{
-			asm.LoadImm(asm.R2, 114514, asm.DWord),
+			asm.LoadImm(asm.R2, withoutClashMark, asm.DWord),
 			asm.StoreMem(asm.R1, offsetOfMark, asm.R2, asm.Word),
 			asm.LoadImm(asm.R0, 1, asm.DWord),
 			asm.Return(),
