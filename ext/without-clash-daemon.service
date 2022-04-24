@@ -1,0 +1,9 @@
+[Unit]
+Description=without-clash daemon
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/without-clash/without-clash-daemon
+
+[Install]
+WantedBy=multi-user.target
