@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -84,6 +85,7 @@ func daemon() {
 	defer lnk.Close()
 
 	rules := []*iproute2.Rule{
+		// IPv4
 		{
 			Priority: &iproute2.Uint32Attr{Value: 8000},
 			Mark:     &iproute2.Uint32Attr{Value: withoutClashMark},
@@ -91,6 +93,17 @@ func daemon() {
 		},
 		{
 			Priority: &iproute2.Uint32Attr{Value: 10000},
+		},
+		// IPv6
+		{
+			Priority: &iproute2.Uint32Attr{Value: 8000},
+			Mark:     &iproute2.Uint32Attr{Value: withoutClashMark},
+			Goto:     &iproute2.Uint32Attr{Value: 10000},
+			Src:      &iproute2.IPCIDRAttr{Value: netip.MustParsePrefix("::/0")},
+		},
+		{
+			Priority: &iproute2.Uint32Attr{Value: 10000},
+			Src:      &iproute2.IPCIDRAttr{Value: netip.MustParsePrefix("::/0")},
 		},
 	}
 
