@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -19,42 +21,35 @@ import (
 )
 
 const (
-	daemonArg0       = "without-clash-daemon"
+	listenPath       = "@without-clash"
 	cgroupSubtree    = "without-clash"
 	offsetOfMark     = 16
 	withoutClashMark = 'w'<<24 | 'o'<<16 | 'c'<<8 | 'h'<<0
 )
 
-func daemon() {
-	if unix.Getuid() != 0 && unix.Geteuid() != 0 {
-		abort("Daemon must run as root")
-	}
-
-	if unix.Getuid() != 0 && unix.Geteuid() == 0 {
-		err := unix.Setuid(0)
-		if err != nil {
-			abort("Unable to evaluate to root: %s", err.Error())
-		}
+func runDaemon() error {
+	if unix.Getuid() != 0 || unix.Geteuid() != 0 {
+		return fmt.Errorf("must run as root, current is %d", os.Getuid())
 	}
 
 	if !cgroup.IsVersion2() {
-		abort("cgroup2 required")
+		return errors.New("unsupported cgroup version, requires version 2")
 	}
 
-	has, err := cgroup.HasSubtree(cgroupSubtree)
+	existed, err := cgroup.HasSubtree(cgroupSubtree)
 	if err != nil {
-		abort("Detect cgroup subtree: %s", err.Error())
+		return fmt.Errorf("detect cgroup subtree: %w", err)
 	}
 
-	if !has {
+	if !existed {
 		err = cgroup.CreateSubtree(cgroupSubtree)
 		if err != nil {
-			abort("Create cgroup subtree: %s", err.Error())
+			return fmt.Errorf("create cgroup: %w", err)
 		}
-		defer func() {
-			_ = cgroup.DeleteSubtree(cgroupSubtree)
-		}()
 	}
+	defer func() {
+		_ = cgroup.DeleteSubtree(cgroupSubtree)
+	}()
 
 	progSpec := &ebpf.ProgramSpec{
 		Name:       "without_clash",
@@ -68,21 +63,21 @@ func daemon() {
 		},
 	}
 
-	prog, err := ebpf.NewProgram(progSpec)
+	program, err := ebpf.NewProgram(progSpec)
 	if err != nil {
-		abort("Compile ebpf program: %s", err.Error())
+		return fmt.Errorf("compile ebpf program: %w", err)
 	}
-	defer prog.Close()
+	defer closeSilent(program)
 
-	lnk, err := link.AttachCgroup(link.CgroupOptions{
+	attachment, err := link.AttachCgroup(link.CgroupOptions{
 		Path:    filepath.Join(cgroup.CgroupPath, cgroupSubtree),
 		Attach:  ebpf.AttachCGroupInetSockCreate,
-		Program: prog,
+		Program: program,
 	})
 	if err != nil {
-		abort("Link ebpf program: %s", err.Error())
+		return fmt.Errorf("attach program to cgroup: %w", err)
 	}
-	defer lnk.Close()
+	defer closeSilent(attachment)
 
 	rules := []*iproute2.Rule{
 		// IPv4
@@ -122,37 +117,32 @@ func daemon() {
 	for _, rule := range rules {
 		err = iproute2.RuleAdd(rule)
 		if err != nil {
-			abort("Add rule: %s", err.Error())
+			return fmt.Errorf("add iproute rule: %w", err)
 		}
 	}
 
-	listener, err := net.Listen("unix", "@"+daemonArg0)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: listenPath, Net: "unix"})
 	if err != nil {
-		abort("Listen daemon unix: %s", err.Error())
+		return fmt.Errorf("listen unix: %w", err)
 	}
-	defer listener.Close()
+	defer closeSilent(listener)
 
 	go func() {
 		for {
-			conn, err := listener.Accept()
+			conn, err := listener.AcceptUnix()
 			if err != nil {
 				continue
 			}
 
 			go func() {
-				defer conn.Close()
+				defer closeSilent(conn)
 
 				n, err := conn.Read([]byte{0})
 				if err != nil || n != 1 {
 					return
 				}
 
-				uc, ok := conn.(*net.UnixConn)
-				if !ok {
-					return
-				}
-
-				sys, err := uc.SyscallConn()
+				sys, err := conn.SyscallConn()
 				if err != nil {
 					return
 				}
@@ -177,6 +167,8 @@ func daemon() {
 				}
 
 				_, _ = conn.Write([]byte{0})
+
+				fmt.Printf("Add process %d to bypass list.\n", pid)
 			}()
 		}
 	}()
@@ -184,4 +176,6 @@ func daemon() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
 	<-signals
+
+	return nil
 }

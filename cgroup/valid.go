@@ -12,7 +12,7 @@ func IsVersion2() bool {
 	if err != nil {
 		panic(err.Error())
 	}
-	defer mounts.Close()
+	defer func() { _ = mounts.Close() }()
 
 	reader := bufio.NewReader(mounts)
 	for {
