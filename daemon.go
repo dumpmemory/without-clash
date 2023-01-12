@@ -51,7 +51,7 @@ func runDaemon() error {
 		_ = cgroup.DeleteSubtree(cgroupSubtree)
 	}()
 
-	progSpec := &ebpf.ProgramSpec{
+	programSpec := &ebpf.ProgramSpec{
 		Name:       "without_clash",
 		Type:       ebpf.CGroupSock,
 		AttachType: ebpf.AttachCGroupInetSockCreate,
@@ -63,7 +63,7 @@ func runDaemon() error {
 		},
 	}
 
-	program, err := ebpf.NewProgram(progSpec)
+	program, err := ebpf.NewProgram(programSpec)
 	if err != nil {
 		return fmt.Errorf("compile ebpf program: %w", err)
 	}
